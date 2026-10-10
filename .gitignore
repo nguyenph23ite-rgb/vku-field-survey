@@ -1,0 +1,62 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Dependencies and build output
+node_modules/
+dist/
+dist-ssr/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
+# Local data and backups
+server-data/surveys.json
+server-data/*.backup*
+*.jfr
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+
+# Accidental empty files
+/item.clientId
+/{
+
+# Temporary editing scripts and backups
+/add-sync.cjs
+/apply-sync.cjs
+/fix-sw.cjs
+/src/*.bak
+/src/*.backup
+/src/*.before-sync.bak
+/src/*.pre-sync.bak
+/src/*.2026-*
+/public/sw.js.bak*
+/public/sw.js.before-*
+/public/sw.js.*.bak

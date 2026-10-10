@@ -1,0 +1,11 @@
+﻿{
+  "name": "VKU Field Survey",
+  "short_name": "VKU Survey",
+  "description": "Ung dung khao sat co so vat chat VKU",
+  "lang": "vi",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f7fb",
+  "theme_color": "#2459a1"
+}
