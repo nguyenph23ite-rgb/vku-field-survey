@@ -1,4 +1,4 @@
-﻿const http = require('http');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
@@ -36,17 +36,27 @@ const server = http.createServer((req, res) => {
 
   if (req.url === '/api/surveys' && req.method === 'POST') {
     let body = '';
+    let payloadTooLarge = false;
+    const MAX_BODY_SIZE = 10 * 1024 * 1024;
+    let bodyBytes = 0;
 
     req.on('data', chunk => {
-      body += chunk;
-      if (body.length > 1024 * 1024) {
+      if (payloadTooLarge) return;
+
+      bodyBytes += chunk.length;
+      if (bodyBytes > MAX_BODY_SIZE) {
+        payloadTooLarge = true;
         res.writeHead(413);
-        res.end(JSON.stringify({ success: false, error: 'Payload too large' }));
-        req.destroy();
+        res.end(JSON.stringify({ success: false, error: 'Payload too large (max 10 MiB)' }));
+        req.resume();
+        return;
       }
+
+      body += chunk.toString('utf8');
     });
 
     req.on('end', () => {
+      if (payloadTooLarge) return;
       try {
         const survey = JSON.parse(body);
 

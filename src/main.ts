@@ -189,7 +189,7 @@ async function getSurveys(): Promise<Survey[]> {
 }
 
 
-const API_URL = 'http://127.0.0.1:3001/api/surveys';
+const API_URL = 'http://127.0.0.1:3000/api/surveys';
 let syncInProgress = false;
 
 async function updateSurveySyncStatus(
@@ -293,7 +293,26 @@ updateNetworkStatus()
 
 async function renderRecords() {
   try {
-    const records = await getSurveys()
+    let records: Survey[]
+
+    if (navigator.onLine) {
+      try {
+        const response = await fetch(API_URL, { cache: 'no-store' })
+        if (!response.ok) throw new Error('HTTP ' + response.status)
+
+        const remoteRecords = await response.json()
+        if (!Array.isArray(remoteRecords)) {
+          throw new Error('API không trả về danh sách phiếu')
+        }
+
+        records = remoteRecords as Survey[]
+      } catch (error) {
+        console.warn('Không tải được phiếu từ máy chủ; dùng IndexedDB:', error)
+        records = await getSurveys()
+      }
+    } else {
+      records = await getSurveys()
+    }
 
     recordCount.textContent = `${records.length} phiếu`
 
@@ -305,7 +324,7 @@ async function renderRecords() {
               <span>${escapeHTML(record.condition)}</span>
             </div>
             <p>${escapeHTML(record.item)}</p>
-            ${record.photoDataUrl ? `<img class="record-photo" src="${record.photoDataUrl}" alt="Ảnh hiện trạng" />` : ''}
+            ${record.photoDataUrl ? `<img class="record-photo" src="${record.photoDataUrl}" alt="Ảnh hiện trường" />` : ''}
             <p>${escapeHTML(record.description || 'Không có mô tả')}</p>
             ${
               record.latitude !== null && record.longitude !== null
