@@ -94,6 +94,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
 type Survey = {
   id?: number
+  syncId?: string
   building: string
   room: string
   item: string
@@ -104,6 +105,8 @@ type Survey = {
   longitude: number | null
   photoDataUrl?: string | null
   syncStatus?: 'pending' | 'synced' | 'deleted'
+  clientId?: string
+  receivedAt?: string
 }
 
 
@@ -223,7 +226,7 @@ function getDeletionQueue(): Promise<DeletionRequest[]> {
 
 
 function enqueueDeletionAndRemoveLocal(
-  id: number,
+  id: number | undefined,
   clientId: string,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -239,7 +242,9 @@ function enqueueDeletionAndRemoveLocal(
           queuedAt: Date.now(),
         } satisfies DeletionRequest)
 
-        transaction.objectStore('surveys').delete(id)
+        if (id !== undefined) {
+          transaction.objectStore('surveys').delete(id)
+        }
 
         transaction.oncomplete = () => {
           db.close()
@@ -266,6 +271,7 @@ async function flushDeletionQueue(): Promise<boolean> {
   if (!navigator.onLine) return false
 
   let requests: DeletionRequest[]
+  let allSucceeded = true
 
   try {
     requests = await getDeletionQueue()
@@ -315,16 +321,21 @@ async function flushDeletionQueue(): Promise<boolean> {
       })
     } catch (error) {
       console.warn('Yêu cầu xóa đang chờ đồng bộ:', error)
-      return false
+      allSucceeded = false
     }
   }
 
-  return true
+  return allSucceeded
 }
 
 
 
-const API_URL = 'http://127.0.0.1:3000/api/surveys';
+const API_HOST = Capacitor.isNativePlatform()
+  ? '10.0.2.2'
+  : window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? '127.0.0.1'
+    : window.location.hostname;
+const API_URL = `http://${API_HOST}:3000/api/surveys`;
 let syncInProgress = false;
 let deletionInProgress = false;
 
@@ -362,6 +373,70 @@ async function updateSurveySyncStatus(
   });
 }
 
+async function updateSurveySyncId(id: number, syncId: string): Promise<void> {
+  const db = await openDatabase();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('surveys', 'readwrite');
+    const store = transaction.objectStore('surveys');
+    let failure: Error | null = null;
+    let closed = false;
+
+    const closeDatabase = () => {
+      if (!closed) {
+        closed = true;
+        db.close();
+      }
+    };
+
+    const request = store.get(id);
+
+    request.onsuccess = () => {
+      const current = request.result as Survey | undefined;
+
+      if (!current) {
+        failure = new Error('Khong tim thay phieu id=' + id);
+        transaction.abort();
+        return;
+      }
+
+      if (current.syncId) return;
+
+      store.put({ ...current, syncId });
+    };
+
+    request.onerror = () => {
+      failure = request.error ?? new Error('Khong doc duoc phieu id=' + id);
+    };
+
+    transaction.oncomplete = () => {
+      closeDatabase();
+      resolve();
+    };
+
+    transaction.onabort = () => {
+      closeDatabase();
+      reject(failure ?? transaction.error ?? new Error('Ghi syncId that bai'));
+    };
+  });
+}
+
+async function ensurePendingSurveySyncIds(): Promise<void> {
+  const records = await getSurveys();
+
+  for (const record of records) {
+    if (
+      record.id === undefined ||
+      record.syncId ||
+      record.syncStatus === 'synced' ||
+      record.syncStatus === 'deleted'
+    ) {
+      continue;
+    }
+
+    await updateSurveySyncId(record.id, crypto.randomUUID());
+  }
+}
 async function syncPendingSurveys(): Promise<void> {
   if (!navigator.onLine || syncInProgress || deletionInProgress) return;
 
@@ -370,11 +445,9 @@ async function syncPendingSurveys(): Promise<void> {
 
   try {
     
-    const deletionsSynced = await flushDeletionQueue()
+    await flushDeletionQueue()
 
-    if (!deletionsSynced) {
-      return
-    }
+    await ensurePendingSurveySyncIds();
 
     const records = await getSurveys();
     const pending = records.filter(
@@ -385,14 +458,21 @@ async function syncPendingSurveys(): Promise<void> {
       if (!navigator.onLine) break;
 
       try {
+        const payload = { ...record }
+        if (record.syncId) {
+          delete payload.id
+          delete payload.syncStatus
+        }
+
         const response = await fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(record),
+          body: JSON.stringify(payload),
         });
+        const result = await response.json();
 
-        if (!response.ok) {
-          throw new Error('HTTP ' + response.status);
+        if (!response.ok || result?.success !== true) {
+          throw new Error(result?.error || 'HTTP ' + response.status);
         }
 
         await updateSurveySyncStatus(record.id!, 'synced');
@@ -455,48 +535,41 @@ async function renderRecords() {
         )
 
         const visibleRemoteRecords = (remoteRecords as Survey[]).filter(
-          (record) =>
-            !pendingDeleteIds.has(String(record.id ?? '')) &&
-            !pendingDeleteIds.has(
-              String((record as Survey & { clientId?: string }).clientId ?? ''),
-            ),
+          (record) => !pendingDeleteIds.has(
+            record.syncId ?? String(record.clientId ?? record.id ?? ''),
+          ),
         )
 
 
-        if (visibleRemoteRecords.length > 0) {
-          const localRecords = await getSurveys()
-          const localById = new Map<number, Survey>()
+        const localRecords = await getSurveys()
+        const localBySyncId = new Map(
+          localRecords
+            .filter((local) => local.syncId !== undefined)
+            .map((local) => [local.syncId!, local]),
+        )
+        const remoteSyncIds = new Set(
+          visibleRemoteRecords
+            .map((remote) => remote.syncId)
+            .filter((syncId): syncId is string => syncId !== undefined),
+        )
 
-          for (const local of localRecords) {
-            if (local.id !== undefined) {
-              localById.set(local.id, local)
-            }
-          }
+        records = visibleRemoteRecords.map((remote) => {
+          const local = remote.syncId
+            ? localBySyncId.get(remote.syncId)
+            : undefined
 
-          records = visibleRemoteRecords.map((remote) => {
-            const local = remote.id === undefined
-              ? undefined
-              : localById.get(remote.id)
+          return local
+            ? { ...remote, id: local.id, syncStatus: local.syncStatus }
+            : remote.syncId
+              ? { ...remote, syncStatus: 'synced' }
+              : { ...remote, id: undefined, syncStatus: 'synced' }
+        })
 
-            return local
-              ? { ...remote, syncStatus: local.syncStatus }
-              : remote
-          })
-
-          const remoteIds = new Set(
-            records
-              .map((record) => record.id)
-              .filter((id): id is number => id !== undefined)
-          )
-
-          records.push(
-            ...localRecords.filter(
-              (local) => local.id !== undefined && !remoteIds.has(local.id)
-            )
-          )
-        } else {
-          records = await getSurveys()
-        }
+        records.push(
+          ...localRecords.filter(
+            (local) => !local.syncId || !remoteSyncIds.has(local.syncId),
+          ),
+        )
       } catch (error) {
         console.warn('Không tải được phiếu từ máy chủ; dùng IndexedDB:', error)
         records = await getSurveys()
@@ -524,7 +597,7 @@ async function renderRecords() {
             }
             <p>${record.syncStatus === 'deleted' ? 'Đã xóa trên máy chủ; cần dọn dữ liệu cục bộ' : record.syncStatus === 'synced' ? 'Đã đồng bộ' : 'Chưa đồng bộ'}</p>
             <small>${escapeHTML(record.createdAt)}</small>
-            ${record.id !== undefined ? `<button type="button" class="record-delete" data-delete-id="${record.id}">Xóa</button>` : ""}
+            ${record.syncId ? `<button type="button" class="record-delete" data-local-id="${record.id ?? ''}" data-sync-id="${escapeHTML(record.syncId)}">Xóa</button>` : '<small>Phiếu định danh cũ; cần đối soát trước khi xóa.</small>'}
           </article>
         `).join('')
       : '<p class="empty">Chưa có phiếu khảo sát.</p>'
@@ -539,12 +612,16 @@ recordList.addEventListener('click', async (event) => {
   const target = event.target
   if (!(target instanceof Element)) return
 
-  const button = target.closest<HTMLButtonElement>('[data-delete-id]')
+  const button = target.closest<HTMLButtonElement>('[data-local-id]')
   if (!button) return
 
-  const id = Number(button.dataset.deleteId)
+  const localId = button.dataset.localId
+    ? Number(button.dataset.localId)
+    : undefined
+  const syncId = button.dataset.syncId || undefined
+  const clientId = syncId
 
-  if (!Number.isSafeInteger(id) || id < 1) {
+  if ((localId !== undefined && (!Number.isSafeInteger(localId) || localId < 1)) || !clientId) {
     message.textContent = 'Mã phiếu không hợp lệ.'
     return
   }
@@ -555,7 +632,7 @@ recordList.addEventListener('click', async (event) => {
   }
 
   if (!confirm(
-    `Xóa phiếu có mã ${id}? Nếu ngoại tuyến, yêu cầu xóa sẽ chờ có mạng.`,
+    `Xóa phiếu có mã ${clientId}? Nếu ngoại tuyến, yêu cầu xóa sẽ chờ có mạng.`,
   )) {
     return
   }
@@ -564,7 +641,7 @@ recordList.addEventListener('click', async (event) => {
   button.disabled = true
 
   try {
-    await enqueueDeletionAndRemoveLocal(id, String(id))
+    await enqueueDeletionAndRemoveLocal(localId, clientId)
 
     message.textContent = navigator.onLine
       ? 'Đã xóa khỏi thiết bị. Đang đồng bộ yêu cầu xóa lên máy chủ...'
@@ -592,6 +669,7 @@ form.addEventListener('submit', async (event) => {
   const data = new FormData(form)
 
   const survey: Survey = {
+    syncId: crypto.randomUUID(),
     building: String(data.get('building')).trim(),
     room: String(data.get('room')).trim(),
     item: String(data.get('item')),

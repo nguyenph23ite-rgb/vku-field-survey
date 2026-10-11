@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && node scripts/finalize-sw.cjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.cjs"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",
