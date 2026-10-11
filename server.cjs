@@ -1,4 +1,4 @@
-const http = require('http');
+﻿const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
@@ -16,7 +16,7 @@ const server = http.createServer((req, res) => {
   console.log(new Date().toLocaleTimeString(), req.method, req.url);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -34,6 +34,34 @@ const server = http.createServer((req, res) => {
     return res.end(fs.readFileSync(DATA_FILE, 'utf8'));
   }
 
+  const deleteMatch = req.url.match(/^\/api\/surveys\/([^/?]+)$/);
+
+  if (req.method === 'DELETE' && deleteMatch) {
+    try {
+      const clientId = decodeURIComponent(deleteMatch[1]);
+      const surveys = JSON.parse(
+        fs.readFileSync(DATA_FILE, 'utf8').replace(/^\uFEFF/, '')
+      );
+      const remaining = surveys.filter(
+        item => String(item.clientId ?? '') !== clientId
+      );
+      const deleted = surveys.length - remaining.length;
+
+      if (deleted > 0) {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(remaining, null, 2), 'utf8');
+      }
+
+      res.writeHead(200);
+      return res.end(JSON.stringify({ success: true, deleted }));
+    } catch (error) {
+      console.error('[DELETE /api/surveys] Error:', error);
+      res.writeHead(500);
+      return res.end(JSON.stringify({
+        success: false,
+        error: 'Internal server error'
+      }));
+    }
+  }
   if (req.url === '/api/surveys' && req.method === 'POST') {
     let body = '';
     let payloadTooLarge = false;
@@ -71,10 +99,10 @@ const server = http.createServer((req, res) => {
           return res.end(JSON.stringify({ success: false, error: 'Invalid survey' }));
         }
 
-        const surveys = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+        const surveys = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8').replace(/^\uFEFF/, ''));
         const clientId = String(survey.id ?? '');
 
-        if (clientId && surveys.some(item => item.clientId === clientId)) {
+        if (clientId && surveys.some(item => String(item.clientId ?? '') === clientId)) {
           res.writeHead(200);
           return res.end(JSON.stringify({ success: true, duplicate: true }));
         }
@@ -88,9 +116,22 @@ const server = http.createServer((req, res) => {
         fs.writeFileSync(DATA_FILE, JSON.stringify(surveys, null, 2), 'utf8');
         res.writeHead(201);
         res.end(JSON.stringify({ success: true }));
-      } catch {
-        res.writeHead(400);
-        res.end(JSON.stringify({ success: false, error: 'Invalid JSON' }));
+      } catch (error) {
+        console.error('[POST /api/surveys] Error:', error);
+
+        if (error instanceof SyntaxError) {
+          res.writeHead(400);
+          return res.end(JSON.stringify({
+            success: false,
+            error: 'Invalid JSON'
+          }));
+        }
+
+        res.writeHead(500);
+        res.end(JSON.stringify({
+          success: false,
+          error: 'Internal server error'
+        }));
       }
     });
 
@@ -104,4 +145,5 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`VKU Survey API running at http://127.0.0.1:${PORT}`);
 });
+
 

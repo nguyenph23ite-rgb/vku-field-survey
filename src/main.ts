@@ -103,8 +103,15 @@ type Survey = {
   latitude: number | null
   longitude: number | null
   photoDataUrl?: string | null
-  syncStatus?: 'pending' | 'synced'
+  syncStatus?: 'pending' | 'synced' | 'deleted'
 }
+
+
+type DeletionRequest = {
+  clientId: string
+  queuedAt: number
+}
+
 
 const form = document.querySelector<HTMLFormElement>('#survey-form')!
 const message = document.querySelector<HTMLParagraphElement>('#message')!
@@ -124,7 +131,7 @@ let photoDataUrl: string | null = null
 // Mở cơ sở dữ liệu IndexedDB
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('VKUFieldSurvey', 1)
+    const request = indexedDB.open('VKUFieldSurvey', 2)
 
     request.onupgradeneeded = () => {
       const db = request.result
@@ -133,6 +140,12 @@ function openDatabase(): Promise<IDBDatabase> {
         db.createObjectStore('surveys', {
           keyPath: 'id',
           autoIncrement: true,
+        })
+      }
+
+      if (!db.objectStoreNames.contains('deletionQueue')) {
+        db.createObjectStore('deletionQueue', {
+          keyPath: 'clientId',
         })
       }
     }
@@ -189,12 +202,135 @@ async function getSurveys(): Promise<Survey[]> {
 }
 
 
+function getDeletionQueue(): Promise<DeletionRequest[]> {
+  return new Promise((resolve, reject) => {
+    openDatabase()
+      .then((db) => {
+        const transaction = db.transaction('deletionQueue', 'readonly')
+        const store = transaction.objectStore('deletionQueue')
+        const request = store.getAll()
+
+        request.onsuccess = () => resolve(request.result as DeletionRequest[])
+        request.onerror = () => reject(request.error)
+
+        transaction.oncomplete = () => db.close()
+        transaction.onerror = () => db.close()
+        transaction.onabort = () => db.close()
+      })
+      .catch(reject)
+  })
+}
+
+
+function enqueueDeletionAndRemoveLocal(
+  id: number,
+  clientId: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    openDatabase()
+      .then((db) => {
+        const transaction = db.transaction(
+          ['surveys', 'deletionQueue'],
+          'readwrite',
+        )
+
+        transaction.objectStore('deletionQueue').put({
+          clientId,
+          queuedAt: Date.now(),
+        } satisfies DeletionRequest)
+
+        transaction.objectStore('surveys').delete(id)
+
+        transaction.oncomplete = () => {
+          db.close()
+          resolve()
+        }
+
+        transaction.onerror = () => {
+          db.close()
+          reject(transaction.error)
+        }
+
+        transaction.onabort = () => {
+          db.close()
+          reject(transaction.error ?? new Error('Giao dịch đã bị hủy'))
+        }
+      })
+      .catch(reject)
+  })
+}
+
+
+
+async function flushDeletionQueue(): Promise<boolean> {
+  if (!navigator.onLine) return false
+
+  let requests: DeletionRequest[]
+
+  try {
+    requests = await getDeletionQueue()
+  } catch (error) {
+    console.error('Không đọc được hàng đợi xóa:', error)
+    return false
+  }
+
+  for (const item of requests) {
+    if (!navigator.onLine) return false
+
+    try {
+      const response = await fetch(
+        `${API_URL}/${encodeURIComponent(item.clientId)}`,
+        { method: 'DELETE' },
+      )
+
+      const result = await response.json()
+
+      if (!response.ok || result?.success !== true) {
+        throw new Error(result?.error || `HTTP ${response.status}`)
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        openDatabase()
+          .then((db) => {
+            const transaction = db.transaction('deletionQueue', 'readwrite')
+
+            transaction.objectStore('deletionQueue').delete(item.clientId)
+
+            transaction.oncomplete = () => {
+              db.close()
+              resolve()
+            }
+
+            transaction.onerror = () => {
+              db.close()
+              reject(transaction.error)
+            }
+
+            transaction.onabort = () => {
+              db.close()
+              reject(transaction.error ?? new Error('Giao dịch đã bị hủy'))
+            }
+          })
+          .catch(reject)
+      })
+    } catch (error) {
+      console.warn('Yêu cầu xóa đang chờ đồng bộ:', error)
+      return false
+    }
+  }
+
+  return true
+}
+
+
+
 const API_URL = 'http://127.0.0.1:3000/api/surveys';
 let syncInProgress = false;
+let deletionInProgress = false;
 
 async function updateSurveySyncStatus(
   id: number,
-  status: 'pending' | 'synced',
+  status: 'pending' | 'synced' | 'deleted',
 ): Promise<void> {
   const db = await openDatabase();
 
@@ -227,15 +363,22 @@ async function updateSurveySyncStatus(
 }
 
 async function syncPendingSurveys(): Promise<void> {
-  if (!navigator.onLine || syncInProgress) return;
+  if (!navigator.onLine || syncInProgress || deletionInProgress) return;
 
   syncInProgress = true;
   let syncedAny = false;
 
   try {
+    
+    const deletionsSynced = await flushDeletionQueue()
+
+    if (!deletionsSynced) {
+      return
+    }
+
     const records = await getSurveys();
     const pending = records.filter(
-      (record) => record.id !== undefined && record.syncStatus !== 'synced',
+      (record) => record.id !== undefined && record.syncStatus !== 'synced' && record.syncStatus !== 'deleted',
     );
 
     for (const record of pending) {
@@ -300,12 +443,60 @@ async function renderRecords() {
         const response = await fetch(API_URL, { cache: 'no-store' })
         if (!response.ok) throw new Error('HTTP ' + response.status)
 
+        
         const remoteRecords = await response.json()
         if (!Array.isArray(remoteRecords)) {
           throw new Error('API không trả về danh sách phiếu')
         }
 
-        records = remoteRecords as Survey[]
+        const queuedDeletions = await getDeletionQueue()
+        const pendingDeleteIds = new Set(
+          queuedDeletions.map((item) => item.clientId),
+        )
+
+        const visibleRemoteRecords = (remoteRecords as Survey[]).filter(
+          (record) =>
+            !pendingDeleteIds.has(String(record.id ?? '')) &&
+            !pendingDeleteIds.has(
+              String((record as Survey & { clientId?: string }).clientId ?? ''),
+            ),
+        )
+
+
+        if (visibleRemoteRecords.length > 0) {
+          const localRecords = await getSurveys()
+          const localById = new Map<number, Survey>()
+
+          for (const local of localRecords) {
+            if (local.id !== undefined) {
+              localById.set(local.id, local)
+            }
+          }
+
+          records = visibleRemoteRecords.map((remote) => {
+            const local = remote.id === undefined
+              ? undefined
+              : localById.get(remote.id)
+
+            return local
+              ? { ...remote, syncStatus: local.syncStatus }
+              : remote
+          })
+
+          const remoteIds = new Set(
+            records
+              .map((record) => record.id)
+              .filter((id): id is number => id !== undefined)
+          )
+
+          records.push(
+            ...localRecords.filter(
+              (local) => local.id !== undefined && !remoteIds.has(local.id)
+            )
+          )
+        } else {
+          records = await getSurveys()
+        }
       } catch (error) {
         console.warn('Không tải được phiếu từ máy chủ; dùng IndexedDB:', error)
         records = await getSurveys()
@@ -331,8 +522,9 @@ async function renderRecords() {
                 ? `<p>GPS: ${record.latitude.toFixed(5)}, ${record.longitude.toFixed(5)}</p>`
                 : ''
             }
-            <p>${record.syncStatus === 'synced' ? 'Đã đồng bộ' : 'Chưa đồng bộ'}</p>
+            <p>${record.syncStatus === 'deleted' ? 'Đã xóa trên máy chủ; cần dọn dữ liệu cục bộ' : record.syncStatus === 'synced' ? 'Đã đồng bộ' : 'Chưa đồng bộ'}</p>
             <small>${escapeHTML(record.createdAt)}</small>
+            ${record.id !== undefined ? `<button type="button" class="record-delete" data-delete-id="${record.id}">Xóa</button>` : ""}
           </article>
         `).join('')
       : '<p class="empty">Chưa có phiếu khảo sát.</p>'
@@ -341,6 +533,57 @@ async function renderRecords() {
     message.textContent = 'Không đọc được dữ liệu. Hãy kiểm tra trình duyệt.'
   }
 }
+
+
+recordList.addEventListener('click', async (event) => {
+  const target = event.target
+  if (!(target instanceof Element)) return
+
+  const button = target.closest<HTMLButtonElement>('[data-delete-id]')
+  if (!button) return
+
+  const id = Number(button.dataset.deleteId)
+
+  if (!Number.isSafeInteger(id) || id < 1) {
+    message.textContent = 'Mã phiếu không hợp lệ.'
+    return
+  }
+
+  if (syncInProgress || deletionInProgress) {
+    message.textContent = 'Đang xử lý đồng bộ hoặc xóa. Hãy thử lại sau.'
+    return
+  }
+
+  if (!confirm(
+    `Xóa phiếu có mã ${id}? Nếu ngoại tuyến, yêu cầu xóa sẽ chờ có mạng.`,
+  )) {
+    return
+  }
+
+  deletionInProgress = true
+  button.disabled = true
+
+  try {
+    await enqueueDeletionAndRemoveLocal(id, String(id))
+
+    message.textContent = navigator.onLine
+      ? 'Đã xóa khỏi thiết bị. Đang đồng bộ yêu cầu xóa lên máy chủ...'
+      : 'Đã xóa khỏi thiết bị. Yêu cầu xóa máy chủ đang chờ có mạng.'
+
+    await renderRecords()
+  } catch (error) {
+    console.error('Không thể lưu yêu cầu xóa:', error)
+    message.textContent =
+      'Không thể lưu yêu cầu xóa. Dữ liệu cục bộ chưa được xác nhận là đã xóa.'
+  } finally {
+    deletionInProgress = false
+    button.disabled = false
+
+    if (navigator.onLine) {
+      void syncPendingSurveys()
+    }
+  }
+})
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault()

@@ -60,3 +60,23 @@ server-data/*.backup*
 /public/sw.js.bak*
 /public/sw.js.before-*
 /public/sw.js.*.bak
+
+# Local recovery scripts and encoding experiments
+/fix-all-mojibake.ps1
+/fix-mojibake.ps1
+/repair-text.ps1
+/scan-mojibake.ps1
+/src/main.encoding-test.ts
+/src/main.recovered-preview.ts
+/src/main.recovered-preview.txt
+/src/main.ts.mojibak
+
+# Local server backups
+/server.cjs.before-*.bak
+
+# Local APK extraction and test artifacts
+/_built_apk/
+/_installed_apk/
+/built-apk.zip
+/installed-base.apk
+/installed-base.zip
