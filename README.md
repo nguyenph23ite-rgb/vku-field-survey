@@ -74,7 +74,6 @@ API hiện có các đường dẫn:
 - `DELETE /api/surveys/:id`
 
 Dữ liệu thử nghiệm được lưu trong `server-data/surveys.json`.
-Tệp dữ liệu này và các bản sao lưu không được đưa vào Git.
 
 ## Chạy ứng dụng Android
 
@@ -107,12 +106,4 @@ server.cjs            API Node.js
 capacitor.config.ts   Cấu hình Capacitor
 android/              Dự án Android
 ```
-
-## Lưu ý
-
-- Dữ liệu trong IndexedDB là dữ liệu cục bộ của trình duyệt hoặc ứng dụng.
-- Cần kiểm thử riêng việc đồng bộ khi mất mạng, khôi phục kết nối và xử lý
-  dữ liệu trùng lặp trên máy chủ.
-- Cần xác minh quyền truy cập và kết quả lấy tọa độ GPS trên thiết bị thật.
-- Chưa cung cấp URL demo công khai trong tài liệu này.
 
