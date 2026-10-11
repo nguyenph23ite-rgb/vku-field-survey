@@ -82,3 +82,10 @@ server-data/*.backup*
 /installed-base.zip
 
 report-screenshots/*.txt
+/.android/
+/.apk-android-home-sync-build/
+/.apk-android-home/
+/.apk-build-gradle-home/
+/.gradle-user-home/
+/.test-android-user-home/
+/.test-avd-home/
