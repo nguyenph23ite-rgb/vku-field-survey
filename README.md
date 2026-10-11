@@ -71,6 +71,7 @@ API hiện có các đường dẫn:
 - `GET /api/health`
 - `GET /api/surveys`
 - `POST /api/surveys`
+- `DELETE /api/surveys/:id`
 
 Dữ liệu thử nghiệm được lưu trong `server-data/surveys.json`.
 Tệp dữ liệu này và các bản sao lưu không được đưa vào Git.
@@ -114,3 +115,4 @@ android/              Dự án Android
   dữ liệu trùng lặp trên máy chủ.
 - Cần xác minh quyền truy cập và kết quả lấy tọa độ GPS trên thiết bị thật.
 - Chưa cung cấp URL demo công khai trong tài liệu này.
+

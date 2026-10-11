@@ -80,3 +80,5 @@ server-data/*.backup*
 /built-apk.zip
 /installed-base.apk
 /installed-base.zip
+
+report-screenshots/*.txt
