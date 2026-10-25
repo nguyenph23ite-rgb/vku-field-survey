@@ -1,109 +1,50 @@
-﻿# VKU Field Survey — Offline Data Collection
+# VKU Field Survey
 
-Ứng dụng khảo sát cơ sở vật chất trong khuôn viên VKU, hướng đến việc
-ghi nhận dữ liệu khi mất kết nối và đồng bộ khi mạng hoạt động trở lại.
+An offline-first facility survey application for the VKU campus, built with TypeScript, Vite, IndexedDB, and Capacitor.
 
-## Công nghệ
+## Features
 
-- TypeScript và Vite
-- Progressive Web App (PWA)
-- Service Worker và Cache Storage
-- IndexedDB để lưu phiếu khảo sát trên thiết bị
-- Capacitor để đóng gói ứng dụng Android
-- Capacitor Camera và Geolocation
-- Node.js để chạy API tiếp nhận phiếu khảo sát
+- Offline survey storage and synchronization queue.
+- Service Worker caching for offline access.
+- Camera and geolocation support on Android.
+- PWA and Android builds.
 
-## Chức năng
+## Getting Started
 
-- Tạo và lưu phiếu khảo sát trên thiết bị.
-- Hỗ trợ lưu dữ liệu khi ngoại tuyến.
-- Có hàng đợi đồng bộ phiếu khảo sát lên API.
-- Chụp ảnh bằng plugin Camera trong ứng dụng Android.
-- Có tích hợp plugin Geolocation; cần kiểm thử riêng việc lấy tọa độ thực tế.
-- Có Service Worker để lưu bộ tài nguyên ứng dụng phục vụ sử dụng ngoại tuyến.
-
-## Yêu cầu
-
-- Node.js và npm
-- Android Studio và Android SDK nếu chạy ứng dụng Android
-- Thiết bị Android hoặc trình giả lập để kiểm thử các chức năng gốc
-
-## Cài đặt và chạy bản web
-
-```powershell
+```bash
 npm install
 npm run dev
 ```
 
-Mở địa chỉ mà Vite hiển thị trong cửa sổ dòng lệnh.
+Build for production:
 
-## Kiểm tra bản dựng
-
-```powershell
+```bash
 npm run build
 ```
 
-Lệnh này kiểm tra TypeScript, tạo bản dựng trong thư mục `dist`
-và chạy script hoàn thiện danh sách tài nguyên của Service Worker.
+## API Server
 
-Có thể xem bản dựng bằng:
-
-```powershell
-npm run preview
+```bash
+node server.cjs
 ```
 
-## Chạy API cục bộ
+Runs on port `3000` by default. Health check: `http://localhost:3000/api/health`.
 
-Mở một cửa sổ PowerShell tại thư mục dự án:
+Survey data is stored in `server-data/surveys.json`.
 
-```powershell
-node .\server.cjs
-```
+## Android
 
-API sử dụng cổng 3000. Có thể kiểm tra tình trạng máy chủ tại:
-
-```text
-http://localhost:3000/api/health
-```
-
-API hiện có các đường dẫn:
-
-- `GET /api/health`
-- `GET /api/surveys`
-- `POST /api/surveys`
-- `DELETE /api/surveys/:id`
-
-Dữ liệu thử nghiệm được lưu trong `server-data/surveys.json`.
-
-## Chạy ứng dụng Android
-
-Sau khi cài các gói npm và hoàn tất bản dựng web:
-
-```powershell
+```bash
 npx cap sync android
 npx cap open android
 ```
 
-Sau đó dùng Android Studio để dựng và chạy ứng dụng.
+Requires Android Studio and the Android SDK.
 
-Nếu API đang chạy trên máy phát triển ở cổng 3000 và ứng dụng Android
-được cấu hình gọi cổng 3001 trên thiết bị giả lập, có thể chuyển tiếp cổng:
+## Structure
 
-```powershell
-adb reverse tcp:3001 tcp:3000
-```
-
-Địa chỉ API của ứng dụng phải khớp với cấu hình hiện hành. Khi triển khai
-trên máy chủ thật, cần cấu hình URL API phù hợp thay cho địa chỉ cục bộ.
-
-## Cấu trúc chính
-
-```text
-src/                  Mã nguồn giao diện và nghiệp vụ
-public/               Manifest, Service Worker và tài nguyên tĩnh
-scripts/              Script hỗ trợ bản dựng
-server.cjs            API Node.js
-capacitor.config.ts   Cấu hình Capacitor
-android/              Dự án Android
-```
-
+- `src/` — Application source
+- `public/` — Static assets and Service Worker
+- `scripts/` — Build scripts
+- `server.cjs` — API server
+- `android/` — Android project
