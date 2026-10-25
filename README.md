@@ -38,13 +38,3 @@ Survey data is stored in `server-data/surveys.json`.
 npx cap sync android
 npx cap open android
 ```
-
-Requires Android Studio and the Android SDK.
-
-## Structure
-
-- `src/` — Application source
-- `public/` — Static assets and Service Worker
-- `scripts/` — Build scripts
-- `server.cjs` — API server
-- `android/` — Android project
